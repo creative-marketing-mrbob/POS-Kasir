@@ -224,14 +224,16 @@ const paymentMethodLabel = method => ({
 }[method] || method || '-');
 const STORAGE_KEY_URL = 'pos_webapp_url';
 const DEFAULT_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxnknylCaGY-aCBFEGQDPClpGlIN5Y01gEYbdbVuEyZfS3nFfKlSy9Lsf854Np5OE6U/exec';
+const AUTH_STORAGE_KEY = 'pos_auth_session';
 
 // ===================================================================
 // API LAYER
 // ===================================================================
-function useApi(webAppUrl) {
+function useApi(webAppUrl, authToken) {
   const callGet = useCallback(async (action, params = {}) => {
     const query = new URLSearchParams({
       action,
+      authToken,
       ...params
     }).toString();
     const res = await fetch(`${webAppUrl}?${query}`);
@@ -239,7 +241,7 @@ function useApi(webAppUrl) {
     const data = await res.json();
     if (data.error) throw new Error(data.error);
     return data;
-  }, [webAppUrl]);
+  }, [webAppUrl, authToken]);
   const callPost = useCallback(async (action, data = {}) => {
     const res = await fetch(webAppUrl, {
       method: 'POST',
@@ -248,14 +250,15 @@ function useApi(webAppUrl) {
       },
       body: JSON.stringify({
         action,
-        data
+        data,
+        authToken
       })
     });
     if (!res.ok) throw new Error('Gagal menghubungi server');
     const result = await res.json();
     if (result.error) throw new Error(result.error);
     return result;
-  }, [webAppUrl]);
+  }, [webAppUrl, authToken]);
   return useMemo(() => ({
     callGet,
     callPost
@@ -267,17 +270,25 @@ function useApi(webAppUrl) {
 // ===================================================================
 function App() {
   const [webAppUrl, setWebAppUrl] = useState(DEFAULT_WEBAPP_URL);
+  const [auth, setAuth] = useState(() => {
+    try { return JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || 'null'); }
+    catch (err) { return null; }
+  });
   const [urlInput, setUrlInput] = useState('');
   const [connectError, setConnectError] = useState('');
   const [connecting, setConnecting] = useState(false);
-  const [activeTab, setActiveTab] = useState('kasir');
+  const [activeTab, setActiveTab] = useState(() => auth?.role === 'guest' ? 'laporan-penjualan' : 'kasir');
   const [products, setProducts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [bundles, setBundles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [globalError, setGlobalError] = useState('');
   const [toast, setToast] = useState(null);
-  const api = useApi(webAppUrl);
+  const api = useApi(webAppUrl, auth?.token || '');
+  const clearAuth = useCallback(() => {
+    try { localStorage.removeItem(AUTH_STORAGE_KEY); } catch (err) {}
+    setAuth(null);
+  }, []);
   const showToast = useCallback((message, type = 'success') => {
     setToast({
       message,
@@ -294,14 +305,20 @@ function App() {
       setCategories(data.categories || []);
       setBundles(data.bundles || []);
     } catch (err) {
+      if (String(err.message).includes('AUTH_REQUIRED') || String(err.message).includes('SESSION_EXPIRED')) clearAuth();
       setGlobalError('Gagal memuat data: ' + err.message);
     } finally {
       setLoading(false);
     }
-  }, [api]);
+  }, [api, clearAuth]);
   useEffect(() => {
-    if (webAppUrl) loadAllData();
-  }, [webAppUrl, loadAllData]);
+    if (webAppUrl && auth) loadAllData();
+  }, [webAppUrl, auth, loadAllData]);
+  useEffect(() => {
+    if (auth?.role === 'guest' && !['laporan-penjualan', 'laporan-stok', 'laporan-keuangan'].includes(activeTab)) {
+      setActiveTab('laporan-penjualan');
+    }
+  }, [auth, activeTab]);
   const handleConnect = async () => {
     if (!urlInput.trim()) {
       setConnectError('URL tidak boleh kosong');
@@ -332,10 +349,24 @@ function App() {
     setWebAppUrl('');
     setUrlInput('');
   };
+  const handleLogin = data => {
+    const nextAuth = { token: data.token, username: data.username, displayName: data.displayName, role: data.role };
+    try { localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(nextAuth)); } catch (err) {}
+    setActiveTab(data.role === 'guest' ? 'laporan-penjualan' : 'kasir');
+    setAuth(nextAuth);
+  };
+  const handleLogout = async () => {
+    try { await api.callPost('logout', {}); } catch (err) {}
+    clearAuth();
+    setProducts([]); setCategories([]); setBundles([]); setCart([]);
+  };
 
   // ============ Cart state (shared across kasir flow) ============
   const [cart, setCart] = useState([]); // [{type, id, name, qty, unitPrice, maxStock}]
 
+  if (!auth) {
+    return /*#__PURE__*/React.createElement(LoginScreen, { webAppUrl: webAppUrl, onLogin: handleLogin });
+  }
   if (!webAppUrl) {
     return /*#__PURE__*/React.createElement(ConnectScreen, {
       urlInput: urlInput,
@@ -350,6 +381,8 @@ function App() {
   }, /*#__PURE__*/React.createElement(Header, {
     activeTab: activeTab,
     setActiveTab: setActiveTab,
+    auth: auth,
+    onLogout: handleLogout,
     onRefresh: loadAllData,
     loading: loading,
     onDisconnect: handleDisconnect
@@ -378,26 +411,65 @@ function App() {
       showToast('Transaksi berhasil disimpan!');
       loadAllData();
     },
-    showToast: showToast
+    showToast: showToast,
+    canEdit: auth.role === 'cashier'
   }), activeTab === 'stok' && /*#__PURE__*/React.createElement(StokTab, {
     products: products,
     categories: categories,
     api: api,
     onChange: loadAllData,
-    showToast: showToast
+    showToast: showToast,
+    canEdit: auth.role === 'cashier'
   }), activeTab === 'bundling' && /*#__PURE__*/React.createElement(BundlingTab, {
     bundles: bundles,
     products: products,
     api: api,
     onChange: loadAllData,
-    showToast: showToast
+    showToast: showToast,
+    canEdit: auth.role === 'cashier'
   }), activeTab === 'laporan-penjualan' && /*#__PURE__*/React.createElement(SalesReportTab, {
-    api: api
+    api: api,
+    canEdit: auth.role === 'cashier'
   }), activeTab === 'laporan-stok' && /*#__PURE__*/React.createElement(StockReportTab, {
     products: products
   }), activeTab === 'laporan-keuangan' && /*#__PURE__*/React.createElement(FinancialReportTab, {
-    api: api
+    api: api,
+    canEdit: auth.role === 'cashier'
   }))));
+}
+
+function LoginScreen({ webAppUrl, onLogin }) {
+  const h = React.createElement;
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const submit = async () => {
+    if (!username.trim() || !password) { setError('Username dan password wajib diisi.'); return; }
+    setLoading(true); setError('');
+    try {
+      const res = await fetch(webAppUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: 'login', data: { username: username.trim(), password } })
+      });
+      const result = await res.json();
+      if (!res.ok || result.error) throw new Error(result.error || 'Gagal menghubungi server');
+      onLogin(result);
+    } catch (err) { setError(String(err.message || err).replace('Exception: ', '')); }
+    finally { setLoading(false); }
+  };
+  return h('div', { style: styles.loginScreen },
+    h('div', { style: styles.loginCard },
+      h('img', { src: './logo.png', alt: 'Logo Mr.BOB', style: styles.loginLogo }),
+      h('h1', { style: styles.loginTitle }, 'POS Merchandise'),
+      h('p', { style: styles.loginSubtitle }, 'Masuk sebagai kasir atau tamu'),
+      h('input', { value: username, onChange: e => setUsername(e.target.value), onKeyDown: e => e.key === 'Enter' && submit(), placeholder: 'Username', autoComplete: 'username', style: styles.connectInput }),
+      h('input', { type: 'password', value: password, onChange: e => setPassword(e.target.value), onKeyDown: e => e.key === 'Enter' && submit(), placeholder: 'Password', autoComplete: 'current-password', style: { ...styles.connectInput, marginTop: 10 } }),
+      error && h('div', { style: styles.connectError }, h(AlertCircle, { size: 14 }), h('span', null, error)),
+      h('button', { onClick: submit, disabled: loading, style: styles.connectButton }, loading ? h(Loader2, { size: 16, className: 'spin' }) : h(Check, { size: 16 }), loading ? 'Memeriksa...' : 'Masuk')
+    )
+  );
 }
 
 // ===================================================================
@@ -453,7 +525,9 @@ function ConnectScreen({
 // ===================================================================
 function Header({
   activeTab,
-  setActiveTab
+  setActiveTab,
+  auth,
+  onLogout
 }) {
   const tabs = [{
     id: 'kasir',
@@ -480,13 +554,18 @@ function Header({
     label: 'Keuangan',
     icon: BarChart3
   }];
+  const visibleTabs = auth.role === 'guest'
+    ? tabs
+      .filter(tab => ['laporan-penjualan', 'laporan-stok', 'laporan-keuangan'].includes(tab.id))
+      .map(tab => tab.id === 'laporan-stok' ? { ...tab, label: 'Stok' } : tab)
+    : tabs;
   return /*#__PURE__*/React.createElement("header", {
     style: styles.header
   }, /*#__PURE__*/React.createElement("div", {
     style: styles.headerTop
   }, /*#__PURE__*/React.createElement("nav", {
     style: styles.nav
-  }, tabs.map(tab => {
+  }, visibleTabs.map(tab => {
     const TabIcon = tab.icon;
     const active = activeTab === tab.id;
     return /*#__PURE__*/React.createElement("button", {
@@ -500,6 +579,13 @@ function Header({
       size: 16
     }), /*#__PURE__*/React.createElement("span", null, tab.label));
   })), /*#__PURE__*/React.createElement("div", {
+    style: styles.headerAccount
+  }, /*#__PURE__*/React.createElement("span", {
+    style: styles.roleBadge
+  }, auth.role === 'cashier' ? 'KASIR' : 'TAMU'), /*#__PURE__*/React.createElement("button", {
+    onClick: onLogout,
+    style: styles.logoutBtn
+  }, "Keluar"), /*#__PURE__*/React.createElement("div", {
     style: styles.brand
   }, /*#__PURE__*/React.createElement("span", {
     style: styles.brandText
@@ -507,7 +593,7 @@ function Header({
     src: "./logo.png",
     alt: "Logo Mr.BOB",
     style: styles.brandLogo
-  }))));
+  })))))
 }
 
 // ===================================================================
@@ -540,7 +626,8 @@ function KasirTab({
   setCart,
   api,
   onCheckoutSuccess,
-  showToast
+  showToast,
+  canEdit
 }) {
   const [search, setSearch] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('all');
@@ -590,7 +677,9 @@ function KasirTab({
       }];
     });
   };
-  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+  return /*#__PURE__*/React.createElement("div", null, !canEdit && /*#__PURE__*/React.createElement("div", {
+    style: styles.readOnlyBanner
+  }, "Mode tamu: katalog hanya dapat dilihat."), /*#__PURE__*/React.createElement("div", {
     style: styles.kasirLayout
   }, /*#__PURE__*/React.createElement("div", {
     style: styles.catalogPane
@@ -648,7 +737,7 @@ function KasirTab({
     const outOfStock = isProduct && stock <= 0;
     return /*#__PURE__*/React.createElement("button", {
       key: id,
-      onClick: () => addToCart(item, isProduct ? 'product' : 'bundle'),
+      onClick: () => canEdit && addToCart(item, isProduct ? 'product' : 'bundle'),
       disabled: outOfStock,
       style: {
         ...styles.productCard,
@@ -671,7 +760,8 @@ function KasirTab({
   }))), /*#__PURE__*/React.createElement(CartPane, {
     cart: cart,
     setCart: setCart,
-    onCheckout: () => setCheckoutOpen(true)
+    onCheckout: () => setCheckoutOpen(true),
+    canEdit: canEdit
   })), checkoutOpen && /*#__PURE__*/React.createElement(CheckoutModal, {
     cart: cart,
     products: products,
@@ -693,7 +783,8 @@ function KasirTab({
 function CartPane({
   cart,
   setCart,
-  onCheckout
+  onCheckout,
+  canEdit
 }) {
   const [customerType, setCustomerType] = useState('umum');
   const updateQty = (id, type, delta) => {
@@ -788,10 +879,10 @@ function CartPane({
     style: styles.cartTotalValue
   }, formatRupiah(total))), /*#__PURE__*/React.createElement("button", {
     onClick: onCheckout,
-    disabled: cart.length === 0,
+    disabled: cart.length === 0 || !canEdit,
     style: {
       ...styles.checkoutBtn,
-      ...(cart.length === 0 ? styles.checkoutBtnDisabled : {})
+      ...(cart.length === 0 || !canEdit ? styles.checkoutBtnDisabled : {})
     }
   }, "Lanjut ke Pembayaran")));
 }
@@ -1046,7 +1137,8 @@ function StokTab({
   categories,
   api,
   onChange,
-  showToast
+  showToast,
+  canEdit
 }) {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [showAddCategory, setShowAddCategory] = useState(false);
@@ -1060,7 +1152,7 @@ function StokTab({
     style: styles.sectionHeader
   }, /*#__PURE__*/React.createElement("h2", {
     style: styles.sectionTitle
-  }, "Manajemen Stok"), /*#__PURE__*/React.createElement("div", {
+  }, "Manajemen Stok"), canEdit && /*#__PURE__*/React.createElement("div", {
     style: styles.sectionActions
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowAddCategory(true),
@@ -1122,7 +1214,7 @@ function StokTab({
   }, p.Stock)), /*#__PURE__*/React.createElement("td", {
     style: styles.td
   }, /*#__PURE__*/React.createElement("div", {
-    style: styles.tableActions
+    style: { ...styles.tableActions, display: canEdit ? 'flex' : 'none' }
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setEditingProduct(p),
     style: styles.iconBtn,
@@ -1146,7 +1238,7 @@ function StokTab({
     title: "Hapus"
   }, /*#__PURE__*/React.createElement(Trash2, {
     size: 14
-  }))))))))), showAddProduct && /*#__PURE__*/React.createElement(ProductFormModal, {
+  }))))))))), showAddProduct && canEdit && /*#__PURE__*/React.createElement(ProductFormModal, {
     categories: categories,
     onClose: () => setShowAddProduct(false),
     onSubmit: async data => {
@@ -1365,7 +1457,8 @@ function BundlingTab({
   products,
   api,
   onChange,
-  showToast
+  showToast,
+  canEdit
 }) {
   const [showAdd, setShowAdd] = useState(false);
   const [editingBundle, setEditingBundle] = useState(null);
@@ -1374,7 +1467,7 @@ function BundlingTab({
     style: styles.sectionHeader
   }, /*#__PURE__*/React.createElement("h2", {
     style: styles.sectionTitle
-  }, "Bundling Produk"), /*#__PURE__*/React.createElement("button", {
+  }, "Bundling Produk"), canEdit && /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowAdd(true),
     style: styles.primaryBtn
   }, /*#__PURE__*/React.createElement(Plus, {
@@ -1392,7 +1485,7 @@ function BundlingTab({
     style: styles.bundleCardHeader
   }, /*#__PURE__*/React.createElement("span", {
     style: styles.bundleCardName
-  }, b.bundleName), /*#__PURE__*/React.createElement("div", {
+  }, b.bundleName), canEdit && /*#__PURE__*/React.createElement("div", {
     style: styles.tableActions
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setEditingBundle(b),
@@ -1795,7 +1888,7 @@ function TransactionEditModal({ transaction, onClose, onSave }) {
   );
 }
 
-function SalesReportTab({ api }) {
+function SalesReportTab({ api, canEdit }) {
   const h = React.createElement;
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -1943,7 +2036,7 @@ function SalesReportTab({ api }) {
             h('td', { style: styles.td }, paymentMethodLabel(tx.paymentMethod)),
             h('td', { style: styles.td }, tx.notes || '-'),
             h('td', { style: styles.td }, formatRupiah(tx.totalAmount)),
-            h('td', { style: styles.td }, legacyMode ? '-' : h('div', { style: styles.tableActions },
+            h('td', { style: styles.td }, legacyMode || !canEdit ? '-' : h('div', { style: styles.tableActions },
               h('button', { onClick: () => setEditing(tx), style: styles.iconBtn, title: 'Edit transaksi' }, h(Edit2, { size: 14 })),
               h('button', { onClick: () => removeTransaction(tx), style: styles.iconBtnDanger, title: 'Hapus transaksi' }, h(Trash2, { size: 14 }))
             ))
@@ -1951,7 +2044,7 @@ function SalesReportTab({ api }) {
         )
       )
     ),
-    editing && h(TransactionEditModal, { transaction: editing, onClose: () => setEditing(null), onSave: async data => {
+    editing && canEdit && h(TransactionEditModal, { transaction: editing, onClose: () => setEditing(null), onSave: async data => {
       try { await api.callPost('updateTransaction', data); setEditing(null); await loadSummary(); }
       catch (err) { setError('Gagal memperbarui transaksi: ' + err.message); }
     } })
@@ -1981,7 +2074,7 @@ function StockReportTab({ products }) {
   );
 }
 
-function FinancialReportTab({ api }) {
+function FinancialReportTab({ api, canEdit }) {
   const h = React.createElement;
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -2024,7 +2117,7 @@ function FinancialReportTab({ api }) {
       h('div', { style: styles.statCard }, h('span', { style: styles.statLabel }, 'Dompet QRIS Merchandise'), h('span', { style: styles.statValue }, formatRupiah(summary.balances.qris_merchandise))),
       h('div', { style: { ...styles.statCard, ...styles.statCardHighlight } }, h('span', { style: styles.statLabelHighlight }, 'Total Semua Dompet'), h('span', { style: { ...styles.statValue, color: '#fff' } }, formatRupiah(summary.totalBalance)))
     ),
-    h('div', { style: { ...styles.filterBar, marginBottom: 20 } },
+    canEdit && h('div', { style: { ...styles.filterBar, marginBottom: 20 } },
       h('div', { style: { minWidth: 145 } }, h('label', { style: styles.formLabel }, 'Tanggal'), h('input', { type: 'date', value: form.date, onChange: e => setForm({ ...form, date: e.target.value }), style: styles.formInput })),
       h('div', { style: { flex: 1, minWidth: 190 } }, h('label', { style: styles.formLabel }, 'Pembelian Barang'), h('input', { value: form.description, onChange: e => setForm({ ...form, description: e.target.value }), style: styles.formInput, placeholder: 'Contoh: Beli kemasan' })),
       h('div', { style: { minWidth: 140 } }, h('label', { style: styles.formLabel }, 'Nominal'), h('input', { type: 'number', min: 1, value: form.amount, onChange: e => setForm({ ...form, amount: e.target.value }), style: styles.formInput, placeholder: '0' })),
@@ -2044,7 +2137,7 @@ function FinancialReportTab({ api }) {
           h('td', { style: styles.td }, paymentMethodLabel(p.wallet)),
           h('td', { style: styles.td }, p.notes || '-'),
           h('td', { style: styles.td }, formatRupiah(p.amount)),
-          h('td', { style: styles.td }, h('button', { onClick: () => removePurchase(p), style: styles.iconBtnDanger, title: 'Hapus pembelian' }, h(Trash2, { size: 14 })))
+          h('td', { style: styles.td }, canEdit ? h('button', { onClick: () => removePurchase(p), style: styles.iconBtnDanger, title: 'Hapus pembelian' }, h(Trash2, { size: 14 })) : '-')
         ))
       )
     ))
@@ -2097,6 +2190,9 @@ const styles = {
     fontSize: 13.5,
     color: COLORS.textMuted
   },
+  headerAccount: { display: 'flex', alignItems: 'center', gap: 8, marginLeft: 'auto' },
+  roleBadge: { fontSize: 10.5, fontWeight: 700, color: COLORS.primary, background: COLORS.primaryLight, padding: '4px 7px', borderRadius: 10 },
+  logoutBtn: { border: `1px solid ${COLORS.border}`, background: '#fff', color: COLORS.textMuted, padding: '6px 9px', borderRadius: 6, fontSize: 11.5, cursor: 'pointer' },
   refreshBtn: {
     background: 'transparent',
     border: `1px solid ${COLORS.border}`,
@@ -2155,6 +2251,7 @@ const styles = {
     marginBottom: 16,
     fontSize: 13.5
   },
+  readOnlyBanner: { background: '#eff6ff', border: '1px solid #bfdbfe', color: '#1d4ed8', padding: '9px 13px', borderRadius: 8, marginBottom: 14, fontSize: 12.5 },
   toast: {
     position: 'fixed',
     top: 16,
@@ -2174,6 +2271,11 @@ const styles = {
     background: COLORS.danger
   },
   // Connect screen
+  loginScreen: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'linear-gradient(135deg, #0f172a, #1e3a5f)', fontFamily: "'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", padding: 20 },
+  loginCard: { background: '#fff', borderRadius: 16, padding: '32px', maxWidth: 380, width: '100%', textAlign: 'center', boxShadow: '0 20px 60px rgba(0,0,0,0.3)' },
+  loginLogo: { width: 110, height: 70, objectFit: 'contain', marginBottom: 8 },
+  loginTitle: { fontSize: 21, fontWeight: 700, margin: '0 0 6px', color: COLORS.text },
+  loginSubtitle: { fontSize: 13, color: COLORS.textMuted, margin: '0 0 20px' },
   connectScreen: {
     minHeight: '100vh',
     display: 'flex',
