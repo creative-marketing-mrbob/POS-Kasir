@@ -223,6 +223,7 @@ const paymentMethodLabel = method => ({
   qris_merchandise: 'QRIS Merchandise'
 }[method] || method || '-');
 const STORAGE_KEY_URL = 'pos_webapp_url';
+const DEFAULT_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxnknylCaGY-aCBFEGQDPClpGlIN5Y01gEYbdbVuEyZfS3nFfKlSy9Lsf854Np5OE6U/exec';
 
 // ===================================================================
 // API LAYER
@@ -265,13 +266,7 @@ function useApi(webAppUrl) {
 // MAIN APP
 // ===================================================================
 function App() {
-  const [webAppUrl, setWebAppUrl] = useState(() => {
-    try {
-      return localStorage.getItem(STORAGE_KEY_URL) || '';
-    } catch (e) {
-      return '';
-    }
-  });
+  const [webAppUrl, setWebAppUrl] = useState(DEFAULT_WEBAPP_URL);
   const [urlInput, setUrlInput] = useState('');
   const [connectError, setConnectError] = useState('');
   const [connecting, setConnecting] = useState(false);
