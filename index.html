@@ -102,6 +102,20 @@ const BarChart3 = p => /*#__PURE__*/React.createElement(Icon, {
     d: "M8 17v-3"
   }))
 });
+const FileChart = p => /*#__PURE__*/React.createElement(Icon, {
+  ...p,
+  d: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
+    d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M14 2v6h6"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M8 17v-3"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M12 17v-5"
+  }), /*#__PURE__*/React.createElement("path", {
+    d: "M16 17v-7"
+  }))
+});
 const Plus = p => /*#__PURE__*/React.createElement(Icon, {
   ...p,
   d: /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("path", {
@@ -552,7 +566,7 @@ function Header({
   }, {
     id: 'laporan-keuangan',
     label: 'Keuangan',
-    icon: BarChart3
+    icon: FileChart
   }];
   const visibleTabs = auth.role === 'guest'
     ? tabs
@@ -2074,6 +2088,69 @@ function StockReportTab({ products }) {
   );
 }
 
+function PurchaseEditModal({ purchase, onClose, onSave }) {
+  const h = React.createElement;
+  const [form, setForm] = useState({
+    date: purchase.dateTime ? new Date(purchase.dateTime).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+    description: purchase.description || '',
+    amount: String(purchase.amount || ''),
+    wallet: purchase.wallet || 'cash',
+    notes: purchase.notes || ''
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const save = async () => {
+    if (!form.description.trim() || Number(form.amount) <= 0) {
+      setError('Nama pembelian dan nominal wajib diisi.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await onSave({ ...form, purchaseId: purchase.purchaseId, amount: Number(form.amount) });
+    } catch (err) {
+      setError('Gagal update pembelian: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+  return h('div', { style: styles.modalOverlay },
+    h('div', { style: styles.modalCardSmall },
+      h('div', { style: styles.modalHeader },
+        h('span', { style: styles.modalTitle }, 'Edit Pembelian'),
+        h('button', { onClick: onClose, style: styles.modalClose }, h(X, { size: 18 }))
+      ),
+      h('div', { style: styles.modalBody },
+        error && h('div', { style: styles.errorBanner }, h(AlertCircle, { size: 16 }), h('span', null, error)),
+        h('div', { style: styles.formRow },
+          h(FormField, { label: 'Tanggal' },
+            h('input', { type: 'date', value: form.date, onChange: e => setForm({ ...form, date: e.target.value }), style: styles.formInput })
+          ),
+          h(FormField, { label: 'Nominal' },
+            h('input', { type: 'number', min: 1, value: form.amount, onChange: e => setForm({ ...form, amount: e.target.value }), style: styles.formInput, placeholder: '0' })
+          )
+        ),
+        h(FormField, { label: 'Pembelian Barang' },
+          h('input', { value: form.description, onChange: e => setForm({ ...form, description: e.target.value }), style: styles.formInput, placeholder: 'Contoh: Beli kemasan' })
+        ),
+        h(FormField, { label: 'Ambil dari Dompet' },
+          h('select', { value: form.wallet, onChange: e => setForm({ ...form, wallet: e.target.value }), style: { ...styles.formInput, height: 38, lineHeight: '20px' } },
+            h('option', { value: 'cash' }, 'Cash'),
+            h('option', { value: 'qris_mrbob' }, 'QRIS Mr.BOB'),
+            h('option', { value: 'qris_merchandise' }, 'QRIS Merchandise'))
+        ),
+        h(FormField, { label: 'Catatan' },
+          h('input', { value: form.notes, onChange: e => setForm({ ...form, notes: e.target.value }), style: styles.formInput, placeholder: 'Opsional' })
+        )
+      ),
+      h('div', { style: styles.modalFooter },
+        h('button', { onClick: onClose, disabled: saving, style: styles.secondaryBtn }, 'Batal'),
+        h('button', { onClick: save, disabled: saving, style: styles.checkoutBtn }, saving ? h(Loader2, { size: 16, className: 'spin' }) : 'Simpan Perubahan')
+      )
+    )
+  );
+}
+
 function FinancialReportTab({ api, canEdit }) {
   const h = React.createElement;
   const [summary, setSummary] = useState(null);
@@ -2081,6 +2158,7 @@ function FinancialReportTab({ api, canEdit }) {
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
   const [editingPurchase, setEditingPurchase] = useState(null);
+  const [walletFilter, setWalletFilter] = useState('all');
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), description: '', amount: '', wallet: 'cash', notes: '' });
   const loadFinance = useCallback(async () => {
     setLoading(true); setError('');
@@ -2089,34 +2167,25 @@ function FinancialReportTab({ api, canEdit }) {
     finally { setLoading(false); }
   }, [api]);
   useEffect(() => { loadFinance(); }, [loadFinance]);
-  const resetPurchaseForm = () => {
-    setEditingPurchase(null);
-    setForm({ date: new Date().toISOString().slice(0, 10), description: '', amount: '', wallet: 'cash', notes: '' });
-  };
-  const startEditPurchase = purchase => {
-    setEditingPurchase(purchase);
-    setError('');
-    setForm({
-      date: purchase.dateTime ? new Date(purchase.dateTime).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
-      description: purchase.description || '',
-      amount: String(purchase.amount || ''),
-      wallet: purchase.wallet || 'cash',
-      notes: purchase.notes || ''
-    });
-  };
+  useEffect(() => {
+    const timer = setInterval(loadFinance, 5000);
+    return () => clearInterval(timer);
+  }, [loadFinance]);
+  const resetPurchaseForm = () => setForm({ date: new Date().toISOString().slice(0, 10), description: '', amount: '', wallet: 'cash', notes: '' });
   const submitPurchase = async () => {
     if (!form.description.trim() || Number(form.amount) <= 0) { setError('Nama pembelian dan nominal wajib diisi.'); return; }
     setSaving(true); setError('');
     try {
-      if (editingPurchase) {
-        await api.callPost('updatePurchase', { ...form, purchaseId: editingPurchase.purchaseId, amount: Number(form.amount) });
-      } else {
-        await api.callPost('addPurchase', { ...form, amount: Number(form.amount) });
-      }
+      await api.callPost('addPurchase', { ...form, amount: Number(form.amount) });
       resetPurchaseForm();
       await loadFinance();
     } catch (err) { setError('Gagal menyimpan pembelian: ' + err.message); }
     finally { setSaving(false); }
+  };
+  const savePurchaseEdit = async data => {
+    await api.callPost('updatePurchase', data);
+    setEditingPurchase(null);
+    await loadFinance();
   };
   const removePurchase = async purchase => {
     if (!confirm('Hapus pembelian "' + purchase.description + '"? Saldo akan dikembalikan.')) return;
@@ -2125,6 +2194,20 @@ function FinancialReportTab({ api, canEdit }) {
   };
   if (loading && !summary) return h('div', { style: styles.loadingState }, h(Loader2, { size: 28, className: 'spin' }), h('p', null, 'Memuat laporan keuangan...'));
   if (!summary) return h('div', { style: styles.errorBanner }, h(AlertCircle, { size: 16 }), h('span', null, error));
+  const walletGroups = [
+    { id: 'cash', label: 'CASH' },
+    { id: 'qris_mrbob', label: 'QRIS Mr.BOB' },
+    { id: 'qris_merchandise', label: 'QRIS Merch' }
+  ];
+  const filteredCashFlows = (summary.cashFlows || []).filter(flow => walletFilter === 'all' || flow.wallet === walletFilter);
+  const purchaseFromFlow = flow => ({
+    purchaseId: flow.purchaseId || flow.id,
+    dateTime: flow.dateTime,
+    description: flow.description,
+    amount: flow.outAmount,
+    wallet: flow.wallet,
+    notes: flow.notes || ''
+  });
   return h('div', null,
     h('div', { style: styles.sectionHeader },
       h('h2', { style: styles.sectionTitle }, 'Laporan Keuangan'),
@@ -2144,27 +2227,52 @@ function FinancialReportTab({ api, canEdit }) {
       h('div', { style: { minWidth: 180 } }, h('label', { style: styles.formLabel }, 'Ambil dari Dompet'), h('select', { value: form.wallet, onChange: e => setForm({ ...form, wallet: e.target.value }), style: { ...styles.formInput, height: 38, lineHeight: '20px' } },
         h('option', { value: 'cash' }, 'Cash'), h('option', { value: 'qris_mrbob' }, 'QRIS Mr.BOB'), h('option', { value: 'qris_merchandise' }, 'QRIS Merchandise'))),
       h('div', { style: { flex: 1, minWidth: 170 } }, h('label', { style: styles.formLabel }, 'Catatan'), h('input', { value: form.notes, onChange: e => setForm({ ...form, notes: e.target.value }), style: styles.formInput, placeholder: 'Opsional' })),
-      h('button', { onClick: submitPurchase, disabled: saving, style: { ...styles.primaryBtn, alignSelf: 'flex-end' } }, saving ? 'Menyimpan...' : editingPurchase ? 'Update Pembelian' : 'Catat Pembelian'),
-      editingPurchase && h('button', { onClick: resetPurchaseForm, disabled: saving, style: { ...styles.secondaryBtn, alignSelf: 'flex-end' } }, 'Batal')
+      h('button', { onClick: submitPurchase, disabled: saving, style: { ...styles.primaryBtn, alignSelf: 'flex-end' } }, saving ? 'Menyimpan...' : 'Catat Pembelian')
     ),
-    h('h3', { style: styles.reportColumnTitle }, 'Riwayat Pembelian'),
-    h('div', { style: styles.tableWrap }, h('table', { style: styles.table },
-      h('thead', null, h('tr', null, h('th', { style: styles.th }, 'Tanggal'), h('th', { style: styles.th }, 'Pembelian'), h('th', { style: styles.th }, 'Dompet'), h('th', { style: styles.th }, 'Catatan'), h('th', { style: styles.th }, 'Nominal'), h('th', { style: styles.th }, 'Aksi'))),
+    h('h3', { style: styles.reportColumnTitle }, 'Transaksi Uang Masuk & Keluar'),
+    h('div', { style: styles.cashFlowFilterBar },
+      h('div', null,
+        h('label', { style: styles.formLabel }, 'Filter Dompet'),
+        h('select', { value: walletFilter, onChange: e => setWalletFilter(e.target.value), style: { ...styles.formInput, minWidth: 190, height: 38, lineHeight: '20px' } },
+          h('option', { value: 'all' }, 'Semua Dompet'),
+          walletGroups.map(wallet => h('option', { key: wallet.id, value: wallet.id }, wallet.label))
+        )
+      ),
+      h('div', { style: styles.cashFlowFilterSummary },
+        walletFilter === 'all' ? 'Menampilkan semua dompet' : 'Menampilkan ' + (walletGroups.find(w => w.id === walletFilter)?.label || walletFilter)
+      )
+    ),
+    h('div', { style: { ...styles.tableWrap, marginBottom: 22 } }, h('table', { style: styles.table },
+      h('thead', null, h('tr', null,
+        h('th', { style: styles.th }, 'Tanggal'),
+        h('th', { style: styles.th }, 'Jenis'),
+        h('th', { style: styles.th }, 'Keterangan'),
+        h('th', { style: styles.th }, 'Dompet'),
+        h('th', { style: styles.th }, 'Masuk'),
+        h('th', { style: styles.th }, 'Keluar'),
+        h('th', { style: styles.th }, 'Aksi')
+      )),
       h('tbody', null,
-        summary.purchases.length === 0 && h('tr', null, h('td', { colSpan: 6, style: styles.emptyTableCell }, 'Belum ada pembelian.')),
-        summary.purchases.map(p => h('tr', { key: p.purchaseId, style: styles.tr },
-          h('td', { style: styles.td }, new Date(p.dateTime).toLocaleDateString('id-ID')),
-          h('td', { style: styles.td }, p.description),
-          h('td', { style: styles.td }, paymentMethodLabel(p.wallet)),
-          h('td', { style: styles.td }, p.notes || '-'),
-          h('td', { style: styles.td }, formatRupiah(p.amount)),
-          h('td', { style: styles.td }, canEdit ? h('div', { style: styles.tableActions },
-            h('button', { onClick: () => startEditPurchase(p), style: styles.iconBtn, title: 'Edit pembelian' }, h(Edit2, { size: 14 })),
-            h('button', { onClick: () => removePurchase(p), style: styles.iconBtnDanger, title: 'Hapus pembelian' }, h(Trash2, { size: 14 }))
+        filteredCashFlows.length === 0 && h('tr', null, h('td', { colSpan: 7, style: styles.emptyTableCell }, 'Belum ada transaksi untuk filter ini.')),
+        filteredCashFlows.map(flow => h('tr', { key: flow.id, style: styles.tr },
+          h('td', { style: styles.td }, new Date(flow.dateTime).toLocaleDateString('id-ID')),
+          h('td', { style: styles.td }, h('span', { style: flow.type === 'income' ? styles.cashFlowBadgeIncome : styles.cashFlowBadgeExpense }, flow.typeLabel || (flow.type === 'income' ? 'Pemasukan' : 'Pengeluaran'))),
+          h('td', { style: styles.td }, flow.notes ? h('div', null, h('div', null, flow.description || '-'), h('div', { style: styles.cashFlowNote }, flow.notes)) : (flow.description || '-')),
+          h('td', { style: styles.td }, paymentMethodLabel(flow.wallet)),
+          h('td', { style: { ...styles.td, color: '#15803d', fontWeight: 700 } }, flow.inAmount ? formatRupiah(flow.inAmount) : '-'),
+          h('td', { style: { ...styles.td, color: COLORS.danger, fontWeight: 700 } }, flow.outAmount ? formatRupiah(flow.outAmount) : '-'),
+          h('td', { style: styles.td }, canEdit && flow.type === 'expense' ? h('div', { style: styles.tableActions },
+            h('button', { onClick: () => setEditingPurchase(purchaseFromFlow(flow)), style: styles.iconBtn, title: 'Edit pengeluaran' }, h(Edit2, { size: 14 })),
+            h('button', { onClick: () => removePurchase(purchaseFromFlow(flow)), style: styles.iconBtnDanger, title: 'Hapus pengeluaran' }, h(Trash2, { size: 14 }))
           ) : '-')
         ))
       )
-    ))
+    )),
+    editingPurchase && h(PurchaseEditModal, {
+      purchase: editingPurchase,
+      onClose: () => setEditingPurchase(null),
+      onSave: savePurchaseEdit
+    })
   );
 }
 
@@ -2900,6 +3008,47 @@ const styles = {
   stockBadgeLow: {
     background: '#fef2f2',
     color: COLORS.danger
+  },
+  cashFlowBadgeIncome: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '4px 10px',
+    borderRadius: 999,
+    background: '#dcfce7',
+    color: '#15803d',
+    fontSize: 12,
+    fontWeight: 700
+  },
+  cashFlowBadgeExpense: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    padding: '4px 10px',
+    borderRadius: 999,
+    background: '#fee2e2',
+    color: COLORS.danger,
+    fontSize: 12,
+    fontWeight: 700
+  },
+  cashFlowFilterBar: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 10
+  },
+  cashFlowFilterSummary: {
+    fontSize: 12.5,
+    color: COLORS.textMuted,
+    background: '#f8fafc',
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: 999,
+    padding: '8px 12px'
+  },
+  cashFlowNote: {
+    marginTop: 3,
+    fontSize: 11.5,
+    color: COLORS.textMuted
   },
   // Form
   formField: {
