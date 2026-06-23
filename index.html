@@ -2080,6 +2080,7 @@ function FinancialReportTab({ api, canEdit }) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [editingPurchase, setEditingPurchase] = useState(null);
   const [form, setForm] = useState({ date: new Date().toISOString().slice(0, 10), description: '', amount: '', wallet: 'cash', notes: '' });
   const loadFinance = useCallback(async () => {
     setLoading(true); setError('');
@@ -2088,12 +2089,31 @@ function FinancialReportTab({ api, canEdit }) {
     finally { setLoading(false); }
   }, [api]);
   useEffect(() => { loadFinance(); }, [loadFinance]);
+  const resetPurchaseForm = () => {
+    setEditingPurchase(null);
+    setForm({ date: new Date().toISOString().slice(0, 10), description: '', amount: '', wallet: 'cash', notes: '' });
+  };
+  const startEditPurchase = purchase => {
+    setEditingPurchase(purchase);
+    setError('');
+    setForm({
+      date: purchase.dateTime ? new Date(purchase.dateTime).toISOString().slice(0, 10) : new Date().toISOString().slice(0, 10),
+      description: purchase.description || '',
+      amount: String(purchase.amount || ''),
+      wallet: purchase.wallet || 'cash',
+      notes: purchase.notes || ''
+    });
+  };
   const submitPurchase = async () => {
     if (!form.description.trim() || Number(form.amount) <= 0) { setError('Nama pembelian dan nominal wajib diisi.'); return; }
     setSaving(true); setError('');
     try {
-      await api.callPost('addPurchase', { ...form, amount: Number(form.amount) });
-      setForm({ ...form, description: '', amount: '', notes: '' });
+      if (editingPurchase) {
+        await api.callPost('updatePurchase', { ...form, purchaseId: editingPurchase.purchaseId, amount: Number(form.amount) });
+      } else {
+        await api.callPost('addPurchase', { ...form, amount: Number(form.amount) });
+      }
+      resetPurchaseForm();
       await loadFinance();
     } catch (err) { setError('Gagal menyimpan pembelian: ' + err.message); }
     finally { setSaving(false); }
@@ -2117,14 +2137,15 @@ function FinancialReportTab({ api, canEdit }) {
       h('div', { style: styles.statCard }, h('span', { style: styles.statLabel }, 'Dompet QRIS Merchandise'), h('span', { style: styles.statValue }, formatRupiah(summary.balances.qris_merchandise))),
       h('div', { style: { ...styles.statCard, ...styles.statCardHighlight } }, h('span', { style: styles.statLabelHighlight }, 'Total Semua Dompet'), h('span', { style: { ...styles.statValue, color: '#fff' } }, formatRupiah(summary.totalBalance)))
     ),
-    canEdit && h('div', { style: { ...styles.filterBar, marginBottom: 20 } },
+    canEdit && h('div', { style: { ...styles.filterBar, marginBottom: 20, alignItems: 'flex-end' } },
       h('div', { style: { minWidth: 145 } }, h('label', { style: styles.formLabel }, 'Tanggal'), h('input', { type: 'date', value: form.date, onChange: e => setForm({ ...form, date: e.target.value }), style: styles.formInput })),
       h('div', { style: { flex: 1, minWidth: 190 } }, h('label', { style: styles.formLabel }, 'Pembelian Barang'), h('input', { value: form.description, onChange: e => setForm({ ...form, description: e.target.value }), style: styles.formInput, placeholder: 'Contoh: Beli kemasan' })),
       h('div', { style: { minWidth: 140 } }, h('label', { style: styles.formLabel }, 'Nominal'), h('input', { type: 'number', min: 1, value: form.amount, onChange: e => setForm({ ...form, amount: e.target.value }), style: styles.formInput, placeholder: '0' })),
-      h('div', { style: { minWidth: 180 } }, h('label', { style: styles.formLabel }, 'Ambil dari Dompet'), h('select', { value: form.wallet, onChange: e => setForm({ ...form, wallet: e.target.value }), style: styles.formInput },
+      h('div', { style: { minWidth: 180 } }, h('label', { style: styles.formLabel }, 'Ambil dari Dompet'), h('select', { value: form.wallet, onChange: e => setForm({ ...form, wallet: e.target.value }), style: { ...styles.formInput, height: 38, lineHeight: '20px' } },
         h('option', { value: 'cash' }, 'Cash'), h('option', { value: 'qris_mrbob' }, 'QRIS Mr.BOB'), h('option', { value: 'qris_merchandise' }, 'QRIS Merchandise'))),
       h('div', { style: { flex: 1, minWidth: 170 } }, h('label', { style: styles.formLabel }, 'Catatan'), h('input', { value: form.notes, onChange: e => setForm({ ...form, notes: e.target.value }), style: styles.formInput, placeholder: 'Opsional' })),
-      h('button', { onClick: submitPurchase, disabled: saving, style: { ...styles.primaryBtn, alignSelf: 'flex-end' } }, saving ? 'Menyimpan...' : 'Catat Pembelian')
+      h('button', { onClick: submitPurchase, disabled: saving, style: { ...styles.primaryBtn, alignSelf: 'flex-end' } }, saving ? 'Menyimpan...' : editingPurchase ? 'Update Pembelian' : 'Catat Pembelian'),
+      editingPurchase && h('button', { onClick: resetPurchaseForm, disabled: saving, style: { ...styles.secondaryBtn, alignSelf: 'flex-end' } }, 'Batal')
     ),
     h('h3', { style: styles.reportColumnTitle }, 'Riwayat Pembelian'),
     h('div', { style: styles.tableWrap }, h('table', { style: styles.table },
@@ -2137,7 +2158,10 @@ function FinancialReportTab({ api, canEdit }) {
           h('td', { style: styles.td }, paymentMethodLabel(p.wallet)),
           h('td', { style: styles.td }, p.notes || '-'),
           h('td', { style: styles.td }, formatRupiah(p.amount)),
-          h('td', { style: styles.td }, canEdit ? h('button', { onClick: () => removePurchase(p), style: styles.iconBtnDanger, title: 'Hapus pembelian' }, h(Trash2, { size: 14 })) : '-')
+          h('td', { style: styles.td }, canEdit ? h('div', { style: styles.tableActions },
+            h('button', { onClick: () => startEditPurchase(p), style: styles.iconBtn, title: 'Edit pembelian' }, h(Edit2, { size: 14 })),
+            h('button', { onClick: () => removePurchase(p), style: styles.iconBtnDanger, title: 'Hapus pembelian' }, h(Trash2, { size: 14 }))
+          ) : '-')
         ))
       )
     ))
