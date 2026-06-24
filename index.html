@@ -239,6 +239,7 @@ const paymentMethodLabel = method => ({
 const STORAGE_KEY_URL = 'pos_webapp_url';
 const DEFAULT_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxnknylCaGY-aCBFEGQDPClpGlIN5Y01gEYbdbVuEyZfS3nFfKlSy9Lsf854Np5OE6U/exec';
 const AUTH_STORAGE_KEY = 'pos_auth_session';
+const isValidWebAppUrl = url => /^https:\/\/script\.google\.com\/macros\/s\/[^/]+\/exec(\?.*)?$/.test(String(url || '').trim());
 
 // ===================================================================
 // API LAYER
@@ -249,7 +250,10 @@ function useApi(webAppUrl, authToken) {
     let data = null;
     try { data = text ? JSON.parse(text) : null; } catch (err) {}
     if (!res.ok) {
-      const detail = data?.error || text.slice(0, 160) || res.statusText || 'Tidak ada detail';
+      const looksLikeGoogleDocs = /docs\.google|spreadsheet|Pengolah kata|<!DOCTYPE html/i.test(text);
+      const detail = looksLikeGoogleDocs
+        ? 'URL backend salah. Pakai URL Web App Apps Script yang berakhir /exec, bukan URL Google Sheet/Docs.'
+        : (data?.error || text.slice(0, 160) || res.statusText || 'Tidak ada detail');
       throw new Error('Gagal menghubungi server (HTTP ' + res.status + '): ' + detail);
     }
     if (!data) throw new Error('Server tidak mengirim JSON valid');
@@ -289,7 +293,14 @@ function useApi(webAppUrl, authToken) {
 // MAIN APP
 // ===================================================================
 function App() {
-  const [webAppUrl, setWebAppUrl] = useState(DEFAULT_WEBAPP_URL);
+  const [webAppUrl, setWebAppUrl] = useState(() => {
+    try {
+      const savedUrl = localStorage.getItem(STORAGE_KEY_URL);
+      if (isValidWebAppUrl(savedUrl)) return savedUrl;
+      localStorage.removeItem(STORAGE_KEY_URL);
+    } catch (err) {}
+    return DEFAULT_WEBAPP_URL;
+  });
   const [auth, setAuth] = useState(() => {
     try { return JSON.parse(localStorage.getItem(AUTH_STORAGE_KEY) || 'null'); }
     catch (err) { return null; }
@@ -348,6 +359,7 @@ function App() {
     setConnectError('');
     try {
       const testUrl = urlInput.trim();
+      if (!isValidWebAppUrl(testUrl)) throw new Error('URL harus Web App Apps Script dan berakhir /exec, bukan URL Google Sheet/Docs.');
       const res = await fetch(`${testUrl}?action=getAllData`);
       if (!res.ok) throw new Error('URL tidak bisa diakses');
       const data = await res.json();
@@ -466,6 +478,7 @@ function LoginScreen({ webAppUrl, onLogin }) {
   const [error, setError] = useState('');
   const submit = async () => {
     if (!username.trim() || !password) { setError('Username dan password wajib diisi.'); return; }
+    if (!isValidWebAppUrl(webAppUrl)) { setError('URL backend salah. Pakai URL Web App Apps Script yang berakhir /exec.'); return; }
     setLoading(true); setError('');
     try {
       const res = await fetch(webAppUrl, {
