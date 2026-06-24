@@ -244,6 +244,18 @@ const AUTH_STORAGE_KEY = 'pos_auth_session';
 // API LAYER
 // ===================================================================
 function useApi(webAppUrl, authToken) {
+  const parseResponse = useCallback(async res => {
+    const text = await res.text();
+    let data = null;
+    try { data = text ? JSON.parse(text) : null; } catch (err) {}
+    if (!res.ok) {
+      const detail = data?.error || text.slice(0, 160) || res.statusText || 'Tidak ada detail';
+      throw new Error('Gagal menghubungi server (HTTP ' + res.status + '): ' + detail);
+    }
+    if (!data) throw new Error('Server tidak mengirim JSON valid');
+    if (data.error) throw new Error(data.error);
+    return data;
+  }, []);
   const callGet = useCallback(async (action, params = {}) => {
     const query = new URLSearchParams({
       action,
@@ -251,11 +263,8 @@ function useApi(webAppUrl, authToken) {
       ...params
     }).toString();
     const res = await fetch(`${webAppUrl}?${query}`);
-    if (!res.ok) throw new Error('Gagal menghubungi server');
-    const data = await res.json();
-    if (data.error) throw new Error(data.error);
-    return data;
-  }, [webAppUrl, authToken]);
+    return parseResponse(res);
+  }, [webAppUrl, authToken, parseResponse]);
   const callPost = useCallback(async (action, data = {}) => {
     const res = await fetch(webAppUrl, {
       method: 'POST',
@@ -268,11 +277,8 @@ function useApi(webAppUrl, authToken) {
         authToken
       })
     });
-    if (!res.ok) throw new Error('Gagal menghubungi server');
-    const result = await res.json();
-    if (result.error) throw new Error(result.error);
-    return result;
-  }, [webAppUrl, authToken]);
+    return parseResponse(res);
+  }, [webAppUrl, authToken, parseResponse]);
   return useMemo(() => ({
     callGet,
     callPost
@@ -467,8 +473,12 @@ function LoginScreen({ webAppUrl, onLogin }) {
         headers: { 'Content-Type': 'text/plain;charset=utf-8' },
         body: JSON.stringify({ action: 'login', data: { username: username.trim(), password } })
       });
-      const result = await res.json();
-      if (!res.ok || result.error) throw new Error(result.error || 'Gagal menghubungi server');
+      const text = await res.text();
+      let result = null;
+      try { result = text ? JSON.parse(text) : null; } catch (err) {}
+      if (!res.ok) throw new Error('Gagal menghubungi server (HTTP ' + res.status + '): ' + ((result && result.error) || text.slice(0, 160) || res.statusText));
+      if (!result) throw new Error('Server tidak mengirim JSON valid');
+      if (result.error) throw new Error(result.error);
       onLogin(result);
     } catch (err) { setError(String(err.message || err).replace('Exception: ', '')); }
     finally { setLoading(false); }
@@ -2167,10 +2177,6 @@ function FinancialReportTab({ api, canEdit }) {
     finally { setLoading(false); }
   }, [api]);
   useEffect(() => { loadFinance(); }, [loadFinance]);
-  useEffect(() => {
-    const timer = setInterval(loadFinance, 5000);
-    return () => clearInterval(timer);
-  }, [loadFinance]);
   const resetPurchaseForm = () => setForm({ date: new Date().toISOString().slice(0, 10), description: '', amount: '', wallet: 'cash', notes: '' });
   const submitPurchase = async () => {
     if (!form.description.trim() || Number(form.amount) <= 0) { setError('Nama pembelian dan nominal wajib diisi.'); return; }
