@@ -480,20 +480,24 @@ function App() {
     api: api,
     onChange: loadAllData,
     showToast: showToast,
-    canEdit: auth.role === 'cashier'
+    canEdit: auth.role === 'cashier',
+    isMobile: isMobile
   }), activeTab === 'bundling' && /*#__PURE__*/React.createElement(BundlingTab, {
     bundles: bundles,
     products: products,
     api: api,
     onChange: loadAllData,
     showToast: showToast,
-    canEdit: auth.role === 'cashier'
+    canEdit: auth.role === 'cashier',
+    isMobile: isMobile
   }), activeTab === 'laporan-penjualan' && /*#__PURE__*/React.createElement(SalesReportTab, {
     api: api,
-    canEdit: auth.role === 'cashier'
+    canEdit: auth.role === 'cashier',
+    isMobile: isMobile
   }), activeTab === 'laporan-keuangan' && /*#__PURE__*/React.createElement(FinancialReportTab, {
     api: api,
-    canEdit: auth.role === 'cashier'
+    canEdit: auth.role === 'cashier',
+    isMobile: isMobile
   }))));
 }
 
@@ -1260,7 +1264,8 @@ function StokTab({
   api,
   onChange,
   showToast,
-  canEdit
+  canEdit,
+  isMobile
 }) {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [showAddCategory, setShowAddCategory] = useState(false);
@@ -1270,8 +1275,18 @@ function StokTab({
     .filter(p => (p.ProductName || '').toLowerCase().includes(search.toLowerCase()))
     .sort((a, b) => (a.ProductName || '').localeCompare(b.ProductName || '', 'id-ID', { sensitivity: 'base' }));
   const categoryName = id => categories.find(c => c.CategoryID === id)?.CategoryName || '-';
+  const removeProduct = async p => {
+    if (!confirm(`Hapus produk "${p.ProductName}"?`)) return;
+    try {
+      await api.callPost('deleteProduct', { productId: p.ProductID });
+      showToast('Produk dihapus');
+      onChange();
+    } catch (err) {
+      showToast('Gagal menghapus produk: ' + err.message, 'error');
+    }
+  };
   return /*#__PURE__*/React.createElement("div", {
-    style: canEdit ? styles.mobileBottomSafe : null
+    style: canEdit && isMobile ? styles.mobileBottomSafe : null
   }, /*#__PURE__*/React.createElement("div", {
     style: styles.sectionHeader
   }, /*#__PURE__*/React.createElement("h2", {
@@ -1292,10 +1307,18 @@ function StokTab({
     style: styles.table
   }, /*#__PURE__*/React.createElement("thead", null, /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("th", {
     style: styles.th
-  }, "Nama Produk"), /*#__PURE__*/React.createElement("th", {
+  }, "Nama Produk"), !isMobile && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("th", {
+    style: styles.th
+  }, "Kategori"), /*#__PURE__*/React.createElement("th", {
+    style: styles.th
+  }, "Harga Umum"), /*#__PURE__*/React.createElement("th", {
+    style: styles.th
+  }, "Harga Karyawan"), /*#__PURE__*/React.createElement("th", {
+    style: styles.th
+  }, "Stok")), /*#__PURE__*/React.createElement("th", {
     style: styles.th
   }, "Aksi"))), /*#__PURE__*/React.createElement("tbody", null, filtered.length === 0 && /*#__PURE__*/React.createElement("tr", null, /*#__PURE__*/React.createElement("td", {
-    colSpan: 2,
+    colSpan: isMobile ? 2 : 6,
     style: styles.emptyTableCell
   }, "Belum ada produk. Klik \"Produk Baru\" untuk menambahkan.")), filtered.map(p => /*#__PURE__*/React.createElement("tr", {
     key: p.ProductID,
@@ -1304,11 +1327,21 @@ function StokTab({
     style: styles.td
   }, /*#__PURE__*/React.createElement("div", {
     style: styles.mobilePrimaryText
-  }, p.ProductName), /*#__PURE__*/React.createElement("div", {
+  }, p.ProductName), isMobile && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
     style: styles.mobileMetaText
   }, categoryName(p.CategoryID), " • Umum ", formatRupiah(p.PriceUmum), " • Karyawan ", formatRupiah(p.PriceKaryawan)), /*#__PURE__*/React.createElement("div", {
     style: styles.mobileMetaText
   }, "Stok: ", /*#__PURE__*/React.createElement("span", {
+    style: Number(p.Stock) <= 5 ? styles.mobileDangerText : styles.mobileSuccessText
+  }, p.Stock)))), !isMobile && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("td", {
+    style: styles.td
+  }, categoryName(p.CategoryID)), /*#__PURE__*/React.createElement("td", {
+    style: styles.td
+  }, formatRupiah(p.PriceUmum)), /*#__PURE__*/React.createElement("td", {
+    style: styles.td
+  }, formatRupiah(p.PriceKaryawan)), /*#__PURE__*/React.createElement("td", {
+    style: styles.td
+  }, /*#__PURE__*/React.createElement("span", {
     style: Number(p.Stock) <= 5 ? styles.mobileDangerText : styles.mobileSuccessText
   }, p.Stock))), /*#__PURE__*/React.createElement("td", {
     style: styles.td
@@ -1321,24 +1354,13 @@ function StokTab({
   }, /*#__PURE__*/React.createElement(Edit2, {
     size: 14
   })), /*#__PURE__*/React.createElement("button", {
-    onClick: async () => {
-      if (!confirm(`Hapus produk "${p.ProductName}"?`)) return;
-      try {
-        await api.callPost('deleteProduct', {
-          productId: p.ProductID
-        });
-        showToast('Produk dihapus');
-        onChange();
-      } catch (err) {
-        showToast('Gagal menghapus produk: ' + err.message, 'error');
-      }
-    },
+    onClick: () => removeProduct(p),
     style: styles.iconBtnDanger,
     title: "Hapus"
   }, /*#__PURE__*/React.createElement(Trash2, {
     size: 14
   }))))))))), canEdit && /*#__PURE__*/React.createElement("div", {
-    style: styles.mobileStickyActions
+    style: isMobile ? styles.mobileStickyActions : styles.desktopActionBar
   }, /*#__PURE__*/React.createElement("button", {
     onClick: () => setShowAddCategory(true),
     style: styles.secondaryBtn
@@ -1569,100 +1591,60 @@ function BundlingTab({
   api,
   onChange,
   showToast,
-  canEdit
+  canEdit,
+  isMobile
 }) {
+  const h = React.createElement;
   const [showAdd, setShowAdd] = useState(false);
   const [editingBundle, setEditingBundle] = useState(null);
   const productName = id => products.find(p => p.ProductID === id)?.ProductName || '(produk dihapus)';
-  return /*#__PURE__*/React.createElement("div", {
-    style: canEdit ? styles.mobileBottomSafe : null
-  }, /*#__PURE__*/React.createElement("div", {
-    style: styles.sectionHeader
-  }, /*#__PURE__*/React.createElement("h2", {
-    style: styles.sectionTitle
-  }, "Bundling Produk")), /*#__PURE__*/React.createElement("p", {
-    style: styles.sectionDesc
-  }, "Bundle adalah paket gabungan dari beberapa produk dengan satu harga. Saat bundle terjual, stok tiap produk penyusunnya otomatis berkurang sesuai komposisi."), /*#__PURE__*/React.createElement("div", {
-    style: styles.bundleGrid
-  }, bundles.length === 0 && /*#__PURE__*/React.createElement("div", {
-    style: styles.emptyState
-  }, "Belum ada paket bundling."), bundles.map(b => /*#__PURE__*/React.createElement("div", {
-    key: b.bundleId,
-    style: styles.bundleCard
-  }, /*#__PURE__*/React.createElement("div", {
-    style: styles.bundleCardHeader
-  }, /*#__PURE__*/React.createElement("span", {
-    style: styles.bundleCardName
-  }, b.bundleName), canEdit && /*#__PURE__*/React.createElement("div", {
-    style: styles.tableActions
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setEditingBundle(b),
-    style: styles.iconBtn
-  }, /*#__PURE__*/React.createElement(Edit2, {
-    size: 14
-  })), /*#__PURE__*/React.createElement("button", {
-    onClick: async () => {
-      if (!confirm(`Hapus bundle "${b.bundleName}"?`)) return;
-      try {
-        await api.callPost('deleteBundle', {
-          bundleId: b.bundleId
-        });
-        showToast('Bundle dihapus');
-        onChange();
-      } catch (err) {
-        showToast('Gagal menghapus bundle: ' + err.message, 'error');
-      }
-    },
-    style: styles.iconBtnDanger
-  }, /*#__PURE__*/React.createElement(Trash2, {
-    size: 14
-  })))), /*#__PURE__*/React.createElement("div", {
-    style: styles.bundleCardPrices
-  }, /*#__PURE__*/React.createElement("span", null, "Umum: ", formatRupiah(b.priceUmum)), /*#__PURE__*/React.createElement("span", null, "Karyawan: ", formatRupiah(b.priceKaryawan))), /*#__PURE__*/React.createElement("div", {
-    style: styles.bundleCardComponents
-  }, b.components.map((comp, i) => /*#__PURE__*/React.createElement("div", {
-    key: i,
-    style: styles.bundleComponentRow
-  }, /*#__PURE__*/React.createElement("span", null, productName(comp.productId)), /*#__PURE__*/React.createElement("span", {
-    style: styles.bundleComponentQty
-  }, "×", comp.qty))))))), canEdit && /*#__PURE__*/React.createElement("div", {
-    style: styles.mobileStickyActions
-  }, /*#__PURE__*/React.createElement("button", {
-    onClick: () => setShowAdd(true),
-    style: styles.primaryBtn
-  }, /*#__PURE__*/React.createElement(Plus, {
-    size: 14
-  }), " Bundle Baru")), showAdd && /*#__PURE__*/React.createElement(BundleFormModal, {
-    products: products,
-    onClose: () => setShowAdd(false),
-    onSubmit: async data => {
-      try {
-        await api.callPost('addBundle', data);
-        showToast('Bundle berhasil dibuat');
-        setShowAdd(false);
-        onChange();
-      } catch (err) {
-        showToast('Gagal membuat bundle: ' + err.message, 'error');
-      }
+  const removeBundle = async b => {
+    if (!confirm(`Hapus bundle "${b.bundleName}"?`)) return;
+    try {
+      await api.callPost('deleteBundle', { bundleId: b.bundleId });
+      showToast('Bundle dihapus');
+      onChange();
+    } catch (err) {
+      showToast('Gagal menghapus bundle: ' + err.message, 'error');
     }
-  }), editingBundle && /*#__PURE__*/React.createElement(BundleFormModal, {
-    products: products,
-    initialData: editingBundle,
-    onClose: () => setEditingBundle(null),
-    onSubmit: async data => {
-      try {
-        await api.callPost('updateBundle', {
-          ...data,
-          bundleId: editingBundle.bundleId
-        });
-        showToast('Bundle berhasil diperbarui');
-        setEditingBundle(null);
-        onChange();
-      } catch (err) {
-        showToast('Gagal memperbarui bundle: ' + err.message, 'error');
-      }
-    }
-  }));
+  };
+  return h('div', { style: canEdit && isMobile ? styles.mobileBottomSafe : null },
+    h('div', { style: styles.sectionHeader }, h('h2', { style: styles.sectionTitle }, 'Bundling Produk')),
+    h('p', { style: styles.sectionDesc }, 'Bundle adalah paket gabungan dari beberapa produk dengan satu harga. Saat bundle terjual, stok tiap produk penyusunnya otomatis berkurang sesuai komposisi.'),
+    h('div', { style: isMobile ? styles.bundleGridMobile : styles.bundleGridDesktop },
+      bundles.length === 0 && h('div', { style: styles.emptyState }, 'Belum ada paket bundling.'),
+      bundles.map(b => h('div', { key: b.bundleId, style: { ...styles.bundleCard, ...(isMobile ? styles.bundleCardMobile : styles.bundleCardDesktop) } },
+        h('div', { style: styles.bundleCardHeader },
+          h('span', { style: styles.bundleCardName }, b.bundleName),
+          canEdit && h('div', { style: styles.tableActions },
+            h('button', { onClick: () => setEditingBundle(b), style: styles.iconBtn, title: 'Edit bundle' }, h(Edit2, { size: 14 })),
+            h('button', { onClick: () => removeBundle(b), style: styles.iconBtnDanger, title: 'Hapus bundle' }, h(Trash2, { size: 14 }))
+          )
+        ),
+        h('div', { style: styles.bundleCardPrices },
+          h('span', null, 'Umum: ', formatRupiah(b.priceUmum)),
+          h('span', null, 'Karyawan: ', formatRupiah(b.priceKaryawan))
+        ),
+        h('div', { style: styles.bundleCardComponents },
+          b.components.map((comp, i) => h('div', { key: i, style: styles.bundleComponentRow },
+            h('span', null, productName(comp.productId)),
+            h('span', { style: styles.bundleComponentQty }, '×', comp.qty)
+          ))
+        )
+      ))
+    ),
+    canEdit && h('div', { style: isMobile ? styles.mobileStickyActions : styles.desktopActionBar },
+      h('button', { onClick: () => setShowAdd(true), style: styles.primaryBtn }, h(Plus, { size: 14 }), ' Bundle Baru')
+    ),
+    showAdd && h(BundleFormModal, { products, onClose: () => setShowAdd(false), onSubmit: async data => {
+      try { await api.callPost('addBundle', data); showToast('Bundle berhasil dibuat'); setShowAdd(false); onChange(); }
+      catch (err) { showToast('Gagal membuat bundle: ' + err.message, 'error'); }
+    } }),
+    editingBundle && h(BundleFormModal, { products, initialData: editingBundle, onClose: () => setEditingBundle(null), onSubmit: async data => {
+      try { await api.callPost('updateBundle', { ...data, bundleId: editingBundle.bundleId }); showToast('Bundle berhasil diperbarui'); setEditingBundle(null); onChange(); }
+      catch (err) { showToast('Gagal memperbarui bundle: ' + err.message, 'error'); }
+    } })
+  );
 }
 function BundleFormModal({
   products,
@@ -2003,7 +1985,7 @@ function TransactionEditModal({ transaction, onClose, onSave }) {
   );
 }
 
-function SalesReportTab({ api, canEdit }) {
+function SalesReportTab({ api, canEdit, isMobile }) {
   const h = React.createElement;
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -2097,12 +2079,12 @@ function SalesReportTab({ api, canEdit }) {
         productSales.length > 8 && h('button', { onClick: () => setShowAllProducts(!showAllProducts), style: styles.productSalesToggle },
           showAllProducts ? 'Tampilkan 8 teratas' : 'Tampilkan semua ' + productSales.length + ' produk')
       ),
-      h('div', { style: styles.productSalesGrid },
-        visibleProductSales.map((item, index) => h('div', { key: item.name, style: { ...styles.productSalesCard, ...(Number(item.qty) === 0 ? styles.productSalesCardZero : {}) } },
+      h('div', { style: isMobile ? styles.productSalesGrid : styles.productSalesGridDesktop },
+        visibleProductSales.map((item, index) => h('div', { key: item.name, style: { ...styles.productSalesCard, ...(!isMobile ? styles.productSalesCardDesktop : {}), ...(Number(item.qty) === 0 ? styles.productSalesCardZero : {}) } },
           h('div', { style: styles.productSalesCardTop },
             h('span', { style: { ...styles.productSalesRank, ...(Number(item.qty) === 0 ? styles.productSalesRankZero : {}) } }, index + 1),
             h('div', { style: styles.productSalesInfo },
-              h('div', { style: styles.productSalesName }, item.name),
+              h('div', { style: { ...styles.productSalesName, ...(!isMobile ? styles.productSalesNameDesktop : {}) } }, item.name),
               h('div', { style: styles.productSalesQty }, item.qty + ' terjual')
             )
           ),
@@ -2121,13 +2103,13 @@ function SalesReportTab({ api, canEdit }) {
         bundleSales.length > 8 && h('button', { onClick: () => setShowAllBundles(!showAllBundles), style: styles.productSalesToggle },
           showAllBundles ? 'Tampilkan 8 teratas' : 'Tampilkan semua ' + bundleSales.length + ' bundle')
       ),
-      h('div', { style: styles.productSalesGrid },
+      h('div', { style: isMobile ? styles.productSalesGrid : styles.productSalesGridDesktop },
         visibleBundleSales.length === 0 && h('div', { style: styles.emptyState }, 'Belum ada bundling.'),
-        visibleBundleSales.map((item, index) => h('div', { key: item.bundleId || item.name, style: { ...styles.productSalesCard, ...(Number(item.qty) === 0 ? styles.productSalesCardZero : {}) } },
+        visibleBundleSales.map((item, index) => h('div', { key: item.bundleId || item.name, style: { ...styles.productSalesCard, ...(!isMobile ? styles.productSalesCardDesktop : {}), ...(Number(item.qty) === 0 ? styles.productSalesCardZero : {}) } },
           h('div', { style: styles.productSalesCardTop },
             h('span', { style: { ...styles.bundleSalesRank, ...(Number(item.qty) === 0 ? styles.productSalesRankZero : {}) } }, index + 1),
             h('div', { style: styles.productSalesInfo },
-              h('div', { style: styles.productSalesName }, item.name),
+              h('div', { style: { ...styles.productSalesName, ...(!isMobile ? styles.productSalesNameDesktop : {}) } }, item.name),
               h('div', { style: styles.productSalesQty }, item.qty + ' bundle terjual')
             )
           ),
@@ -2143,22 +2125,29 @@ function SalesReportTab({ api, canEdit }) {
     h('div', { style: { ...styles.tableWrap, marginBottom: 20 } },
       h('table', { style: styles.table },
         h('thead', null, h('tr', null,
-          h('th', { style: styles.th }, 'Item'), h('th', { style: styles.th }, 'Total'), h('th', { style: styles.th }, 'Aksi'))),
+          !isMobile && h('th', { style: styles.th }, 'Tanggal'),
+          h('th', { style: styles.th }, 'Item'),
+          !isMobile && h('th', { style: styles.th }, 'Pembayaran'),
+          !isMobile && h('th', { style: styles.th }, 'Catatan'),
+          h('th', { style: styles.th }, 'Total'), h('th', { style: styles.th }, 'Aksi'))),
         h('tbody', null,
-          txs.length === 0 && h('tr', null, h('td', { colSpan: 3, style: styles.emptyTableCell }, 'Tidak ada penjualan pada rentang tanggal ini.')),
+          txs.length === 0 && h('tr', null, h('td', { colSpan: isMobile ? 3 : 6, style: styles.emptyTableCell }, 'Tidak ada penjualan pada rentang tanggal ini.')),
           txs.map(tx => h('tr', { key: tx.transactionId, style: styles.tr },
+            !isMobile && h('td', { style: styles.td }, tx.dateTime ? new Date(tx.dateTime).toLocaleString('id-ID') : '-'),
             h('td', { style: styles.td },
               h('div', { style: styles.mobilePrimaryText }, tx.items.map(item => item.name + ' ×' + item.qty).join(', ')),
-              expandedTx === tx.transactionId && h('div', { style: styles.mobileDetailBox },
+              isMobile && expandedTx === tx.transactionId && h('div', { style: styles.mobileDetailBox },
                 h('div', null, 'Tanggal: ', tx.dateTime ? new Date(tx.dateTime).toLocaleString('id-ID') : '-'),
                 h('div', null, 'Pembayaran: ', paymentMethodLabel(tx.paymentMethod)),
                 h('div', null, 'Catatan: ', tx.notes || '-'),
                 h('div', null, 'ID: ', tx.transactionId)
               )
             ),
+            !isMobile && h('td', { style: styles.td }, paymentMethodLabel(tx.paymentMethod)),
+            !isMobile && h('td', { style: styles.td }, tx.notes || '-'),
             h('td', { style: styles.td }, formatRupiah(tx.totalAmount)),
             h('td', { style: styles.td }, h('div', { style: styles.tableActions },
-              h('button', { onClick: () => setExpandedTx(expandedTx === tx.transactionId ? null : tx.transactionId), style: styles.iconBtn, title: 'Detail transaksi' }, expandedTx === tx.transactionId ? 'Tutup' : 'Detail'),
+              isMobile && h('button', { onClick: () => setExpandedTx(expandedTx === tx.transactionId ? null : tx.transactionId), style: styles.iconBtn, title: 'Detail transaksi' }, expandedTx === tx.transactionId ? 'Tutup' : 'Detail'),
               legacyMode || !canEdit ? null : h(React.Fragment, null,
               h('button', { onClick: () => setEditing(tx), style: styles.iconBtn, title: 'Edit transaksi' }, h(Edit2, { size: 14 })),
               h('button', { onClick: () => removeTransaction(tx), style: styles.iconBtnDanger, title: 'Hapus transaksi' }, h(Trash2, { size: 14 }))
@@ -2244,7 +2233,7 @@ function PurchaseEditModal({ purchase, onClose, onSave }) {
   );
 }
 
-function FinancialReportTab({ api, canEdit }) {
+function FinancialReportTab({ api, canEdit, isMobile }) {
   const h = React.createElement;
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -2338,22 +2327,30 @@ function FinancialReportTab({ api, canEdit }) {
     ),
     h('div', { style: { ...styles.tableWrap, marginBottom: 22 } }, h('table', { style: styles.table },
       h('thead', null, h('tr', null,
+        !isMobile && h('th', { style: styles.th }, 'Tanggal'),
+        !isMobile && h('th', { style: styles.th }, 'Jenis'),
         h('th', { style: styles.th }, 'Keterangan'),
+        !isMobile && h('th', { style: styles.th }, 'Dompet'),
+        !isMobile && h('th', { style: styles.th }, 'Catatan'),
         h('th', { style: styles.th }, 'Jumlah'),
         h('th', { style: styles.th }, 'Aksi')
       )),
       h('tbody', null,
-        filteredCashFlows.length === 0 && h('tr', null, h('td', { colSpan: 3, style: styles.emptyTableCell }, 'Belum ada transaksi untuk filter ini.')),
+        filteredCashFlows.length === 0 && h('tr', null, h('td', { colSpan: isMobile ? 3 : 7, style: styles.emptyTableCell }, 'Belum ada transaksi untuk filter ini.')),
         filteredCashFlows.map(flow => h('tr', { key: flow.id, style: styles.tr },
+          !isMobile && h('td', { style: styles.td }, new Date(flow.dateTime).toLocaleDateString('id-ID')),
+          !isMobile && h('td', { style: { ...styles.td, color: flow.type === 'income' ? '#15803d' : COLORS.danger, fontWeight: 700 } }, flow.typeLabel || (flow.type === 'income' ? 'Pemasukan' : 'Pengeluaran')),
           h('td', { style: styles.td },
             h('div', { style: styles.mobilePrimaryText }, flow.description || '-'),
-            h('div', { style: styles.mobileMetaText },
+            isMobile && h('div', { style: styles.mobileMetaText },
               new Date(flow.dateTime).toLocaleDateString('id-ID'), ' • ',
               flow.typeLabel || (flow.type === 'income' ? 'Pemasukan' : 'Pengeluaran'), ' • ',
               paymentMethodLabel(flow.wallet)
             ),
-            flow.notes && h('div', { style: styles.cashFlowNote }, flow.notes)
+            isMobile && flow.notes && h('div', { style: styles.cashFlowNote }, flow.notes)
           ),
+          !isMobile && h('td', { style: styles.td }, paymentMethodLabel(flow.wallet)),
+          !isMobile && h('td', { style: styles.td }, flow.notes || '-'),
           h('td', { style: { ...styles.td, color: flow.type === 'income' ? '#15803d' : COLORS.danger, fontWeight: 800 } }, formatRupiah(flow.type === 'income' ? flow.inAmount : flow.outAmount)),
           h('td', { style: styles.td }, canEdit && flow.purchaseId ? h('div', { style: styles.tableActions },
             h('button', { onClick: () => setEditingPurchase(purchaseFromFlow(flow)), style: styles.iconBtn, title: 'Edit transaksi' }, h(Edit2, { size: 14 })),
@@ -3207,6 +3204,12 @@ const styles = {
     borderTop: `1px solid ${COLORS.border}`,
     boxShadow: '0 -8px 24px rgba(15,23,42,0.12)'
   },
+  desktopActionBar: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: 8,
+    marginTop: 14
+  },
   mobilePrimaryText: {
     fontSize: 13,
     fontWeight: 700,
@@ -3340,6 +3343,10 @@ const styles = {
     marginBottom: 8,
     alignItems: 'center'
   },
+  desktopComponentLine: {
+    lineHeight: 1.55,
+    whiteSpace: 'normal'
+  },
   addComponentBtn: {
     display: 'flex',
     alignItems: 'center',
@@ -3360,7 +3367,13 @@ const styles = {
     gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
     gap: 8
   },
+  bundleGridDesktop: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+    gap: 12
+  },
   bundleGridMobile: {
+    display: 'grid',
     gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
     gap: 8
   },
@@ -3372,6 +3385,10 @@ const styles = {
   },
   bundleCardMobile: {
     padding: 10
+  },
+  bundleCardDesktop: {
+    padding: 14,
+    minHeight: 210
   },
   bundleCardHeader: {
     display: 'flex',
@@ -3432,15 +3449,18 @@ const styles = {
   productSalesSubtitle: { fontSize: 11.5, color: COLORS.textMuted, marginTop: 3 },
   productSalesToggle: { border: 'none', background: 'transparent', color: COLORS.primary, fontSize: 11.5, fontWeight: 600, cursor: 'pointer', padding: 2 },
   productSalesGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: 10 },
+  productSalesGridDesktop: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: 12 },
   productSalesCard: { border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 10, background: '#fff' },
+  productSalesCardDesktop: { minHeight: 0 },
   productSalesCardZero: { background: '#f8fafc' },
   productSalesCardTop: { display: 'flex', alignItems: 'flex-start', gap: 9, marginBottom: 9 },
   productSalesRank: { display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 22, height: 22, borderRadius: 11, background: '#dcfce7', color: '#15803d', fontSize: 11, fontWeight: 700 },
   productSalesRankZero: { background: '#e2e8f0', color: COLORS.textMuted },
   productSalesInfo: { minWidth: 0, flex: 1 },
   productSalesName: { fontSize: 12, color: COLORS.textMuted, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' },
+  productSalesNameDesktop: { whiteSpace: 'normal', overflow: 'visible', lineHeight: 1.3 },
   productSalesQty: { fontSize: 13.5, fontWeight: 700, color: COLORS.text, marginTop: 2 },
-  productSalesTrack: { height: 4, background: '#e2e8f0', borderRadius: 4, overflow: 'hidden' },
+  productSalesTrack: { height: 4, background: '#e2e8f0', borderRadius: 4, overflow: 'hidden', marginTop: 8 },
   productSalesBar: { height: '100%', background: '#16a34a', borderRadius: 4, minWidth: 0 },
   bundleSalesRank: { display: 'flex', alignItems: 'center', justifyContent: 'center', minWidth: 22, height: 22, borderRadius: 11, background: COLORS.primaryLight, color: COLORS.primary, fontSize: 11, fontWeight: 700 },
   bundleSalesBar: { height: '100%', background: COLORS.primary, borderRadius: 4, minWidth: 0 },
