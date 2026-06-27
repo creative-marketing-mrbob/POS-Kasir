@@ -492,6 +492,8 @@ function App() {
     isMobile: isMobile
   }), activeTab === 'laporan-penjualan' && /*#__PURE__*/React.createElement(SalesReportTab, {
     api: api,
+    products: products,
+    bundles: bundles,
     canEdit: auth.role === 'cashier',
     isMobile: isMobile
   }), activeTab === 'laporan-keuangan' && /*#__PURE__*/React.createElement(FinancialReportTab, {
@@ -1020,7 +1022,7 @@ function BundleSwapEditor({ item, cartIndex, products, onChange }) {
   const h = React.createElement;
   const sortedProducts = [...products].sort((a, b) => String(a.ProductName).localeCompare(String(b.ProductName), 'id-ID'));
   return h('div', { style: styles.bundleSwapPanel },
-    h('div', { style: styles.bundleSwapTitle }, 'Ganti komponen sesuai ketersediaan stok'),
+    h('div', { style: styles.bundleSwapTitle }, 'Custom ', item.name, ' #', item.bundleUnit),
     item.components.map((comp, componentIndex) => h('div', { key: componentIndex, style: styles.bundleSwapRow },
       h('span', { style: styles.bundleSwapLabel }, 'Komponen ' + (componentIndex + 1) + ' ×' + comp.qty),
       h('select', {
@@ -1030,10 +1032,9 @@ function BundleSwapEditor({ item, cartIndex, products, onChange }) {
       }, sortedProducts.map(product => h('option', {
         key: product.ProductID,
         value: product.ProductID,
-        disabled: Number(product.Stock) < Number(comp.qty) * Number(item.qty)
+        disabled: Number(product.Stock) < Number(comp.qty)
       }, product.ProductName + ' (stok ' + product.Stock + ')')))
-    )),
-    item.maxStock < item.qty && h('div', { style: styles.bundleStockError }, 'Stok komponen pilihan hanya cukup untuk ' + item.maxStock + ' bundle')
+    ))
   );
 }
 
@@ -1057,11 +1058,21 @@ function CheckoutModal({
     });
     return limits.length ? Math.min(...limits) : 0;
   };
-  const [cart, setCart] = useState(() => initialCart.map(item => {
+  const [cart, setCart] = useState(() => initialCart.flatMap((item, cartIndex) => {
     if (item.type !== 'bundle') return item;
     const bundle = bundles.find(b => b.bundleId === item.id);
-    const components = (item.components || bundle?.components || []).map(comp => ({ productId: comp.productId, qty: Number(comp.qty) || 1 }));
-    return { ...item, components, maxStock: calculateBundleMaxStock(components) };
+    const baseComponents = item.components || bundle?.components || [];
+    return Array.from({ length: Number(item.qty) || 1 }, (_, unitIndex) => {
+      const components = baseComponents.map(comp => ({ productId: comp.productId, qty: Number(comp.qty) || 1 }));
+      return {
+        ...item,
+        qty: 1,
+        instanceId: `${item.id}-${cartIndex}-${unitIndex}`,
+        bundleUnit: unitIndex + 1,
+        components,
+        maxStock: calculateBundleMaxStock(components)
+      };
+    });
   }));
   const [customerType, setCustomerType] = useState('umum');
   const [step, setStep] = useState('review'); // review | payment
@@ -1087,14 +1098,33 @@ function CheckoutModal({
       return c;
     }).filter(c => c.qty > 0));
   };
-  const removeItem = (id, type) => {
-    setCart(prev => prev.filter(c => !(c.id === id && c.type === type)));
+  const removeCheckoutItem = (id, type, instanceId) => {
+    setCart(prev => prev.filter(c => instanceId ? c.instanceId !== instanceId : !(c.id === id && c.type === type)));
   };
   const total = cart.reduce((sum, c) => {
     const price = customerType === 'karyawan' ? c.priceKaryawan : c.priceUmum;
     return sum + price * c.qty;
   }, 0);
-  const hasStockIssue = cart.some(c => c.type === 'bundle' && (c.maxStock < c.qty || c.maxStock < 1));
+  const bundleStockIssues = (() => {
+    const needed = {};
+    cart.forEach(item => {
+      if (item.type === 'product') {
+        needed[item.id] = (needed[item.id] || 0) + Number(item.qty || 0);
+      } else if (item.type === 'bundle') {
+        item.components.forEach(comp => {
+          needed[comp.productId] = (needed[comp.productId] || 0) + Number(comp.qty || 0) * Number(item.qty || 0);
+        });
+      }
+    });
+    return Object.keys(needed).filter(productId => {
+      const product = products.find(p => p.ProductID === productId);
+      return !product || Number(product.Stock) < needed[productId];
+    }).map(productId => {
+      const product = products.find(p => p.ProductID === productId);
+      return (product?.ProductName || productId) + ' (perlu ' + needed[productId] + ', stok ' + (product?.Stock || 0) + ')';
+    });
+  })();
+  const hasStockIssue = bundleStockIssues.length > 0;
   const handlePay = async () => {
     if (!paymentMethod) return;
     setProcessing(true);
@@ -1158,7 +1188,7 @@ function CheckoutModal({
   }, "Keranjang kosong."), cart.map((c, cartIndex) => {
     const price = customerType === 'karyawan' ? c.priceKaryawan : c.priceUmum;
     return /*#__PURE__*/React.createElement("div", {
-      key: `${c.type}-${c.id}`,
+      key: c.instanceId || `${c.type}-${c.id}`,
       style: styles.reviewItem
     }, /*#__PURE__*/React.createElement("div", {
       style: styles.reviewItemInfo
@@ -1173,7 +1203,9 @@ function CheckoutModal({
       style: styles.reviewItemUnitPrice
     }, formatRupiah(price), " / item")), /*#__PURE__*/React.createElement("div", {
       style: styles.qtyControl
-    }, /*#__PURE__*/React.createElement("button", {
+    }, c.type === 'bundle' ? /*#__PURE__*/React.createElement("span", {
+      style: styles.bundleUnitBadge
+    }, "1 paket") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("button", {
       onClick: () => updateQty(c.id, c.type, -1),
       style: styles.qtyBtn
     }, /*#__PURE__*/React.createElement(Minus, {
@@ -1185,10 +1217,10 @@ function CheckoutModal({
       style: styles.qtyBtn
     }, /*#__PURE__*/React.createElement(Plus, {
       size: 12
-    }))), /*#__PURE__*/React.createElement("span", {
+    })))), /*#__PURE__*/React.createElement("span", {
       style: styles.reviewItemSubtotal
     }, formatRupiah(price * c.qty)), /*#__PURE__*/React.createElement("button", {
-      onClick: () => removeItem(c.id, c.type),
+      onClick: () => removeCheckoutItem(c.id, c.type, c.instanceId),
       style: styles.cartItemRemove
     }, /*#__PURE__*/React.createElement(Trash2, {
       size: 14
@@ -1198,7 +1230,9 @@ function CheckoutModal({
       products: products,
       onChange: updateBundleComponent
     }));
-  })), /*#__PURE__*/React.createElement("div", {
+  }), bundleStockIssues.length > 0 && /*#__PURE__*/React.createElement("div", {
+    style: styles.bundleStockError
+  }, "Stok pesanan tidak cukup: ", bundleStockIssues.join(', '))), /*#__PURE__*/React.createElement("div", {
     style: styles.modalFooter
   }, /*#__PURE__*/React.createElement("div", {
     style: styles.cartTotalRow
@@ -1926,18 +1960,43 @@ function LaporanTab({
 // ===================================================================
 // STYLES
 // ===================================================================
-function TransactionEditModal({ transaction, onClose, onSave }) {
+function bundleComponentsText(item, products) {
+  if (item.type !== 'bundle') return '';
+  if (!Array.isArray(item.components) || item.components.length === 0) return 'Komponen belum tercatat';
+  return item.components.map(comp => {
+    const product = products.find(p => p.ProductID === comp.productId);
+    return (product?.ProductName || comp.productId) + ' ×' + comp.qty;
+  }).join(', ');
+}
+
+function TransactionEditModal({ transaction, products, bundles, onClose, onSave }) {
   const h = React.createElement;
   const [form, setForm] = useState({
     customerType: transaction.customerType || 'umum',
     paymentMethod: transaction.paymentMethod || 'cash',
     notes: transaction.notes || '',
-    items: transaction.items.map(item => ({ ...item }))
+    items: transaction.items.flatMap(item => {
+      if (item.type !== 'bundle') return { ...item };
+      const bundle = bundles.find(b => b.bundleId === item.id);
+      const components = (item.components?.length ? item.components : bundle?.components || []).map(comp => ({ ...comp, qty: Number(comp.qty) || 1 }));
+      return Array.from({ length: Number(item.qty) || 1 }, () => ({
+        ...item,
+        qty: 1,
+        components: components.map(comp => ({ ...comp }))
+      }));
+    })
   });
   const [saving, setSaving] = useState(false);
   const updateItem = (index, field, value) => setForm({
     ...form,
     items: form.items.map((item, i) => i === index ? { ...item, [field]: Number(value) } : item)
+  });
+  const updateBundleComponent = (itemIndex, componentIndex, productId) => setForm({
+    ...form,
+    items: form.items.map((item, i) => i !== itemIndex ? item : {
+      ...item,
+      components: item.components.map((comp, j) => j === componentIndex ? { ...comp, productId } : comp)
+    })
   });
   const save = async () => {
     if (form.items.some(item => item.qty < 1 || item.unitPrice < 0)) return;
@@ -1967,12 +2026,23 @@ function TransactionEditModal({ transaction, onClose, onSave }) {
         ),
         h('div', { style: styles.formField },
           h('label', { style: styles.formLabel }, 'Item Penjualan'),
-          form.items.map((item, i) => h('div', { key: i, style: { ...styles.componentRow, alignItems: 'flex-end' } },
-            h('div', { style: { flex: 1, fontSize: 13, paddingBottom: 10 } }, item.name),
-            h('div', { style: { width: 72 } }, h('label', { style: styles.formLabel }, 'Qty'),
-              h('input', { type: 'number', min: 1, value: item.qty, onChange: e => updateItem(i, 'qty', e.target.value), style: styles.formInput })),
-            h('div', { style: { width: 130 } }, h('label', { style: styles.formLabel }, 'Harga'),
-              h('input', { type: 'number', min: 0, value: item.unitPrice, onChange: e => updateItem(i, 'unitPrice', e.target.value), style: styles.formInput }))
+          form.items.map((item, i) => h('div', { key: i, style: styles.transactionEditItem },
+            h('div', { style: { ...styles.componentRow, alignItems: 'flex-end' } },
+              h('div', { style: { flex: 1, fontSize: 13, paddingBottom: 10 } }, item.name, item.type === 'bundle' ? ' (unit ' + form.items.slice(0, i + 1).filter(candidate => candidate.type === 'bundle' && candidate.id === item.id).length + ')' : ''),
+              h('div', { style: { width: 72 } }, h('label', { style: styles.formLabel }, 'Qty'),
+                h('input', { type: 'number', min: 1, value: item.qty, disabled: item.type === 'bundle', title: item.type === 'bundle' ? 'Setiap bundling diedit per unit' : '', onChange: e => updateItem(i, 'qty', e.target.value), style: styles.formInput })),
+              h('div', { style: { width: 130 } }, h('label', { style: styles.formLabel }, 'Harga'),
+                h('input', { type: 'number', min: 0, value: item.unitPrice, onChange: e => updateItem(i, 'unitPrice', e.target.value), style: styles.formInput }))
+            ),
+            item.type === 'bundle' && h('div', { style: styles.bundleEditComponents },
+              h('div', { style: styles.bundleSwapTitle }, 'Update isi bundling'),
+              item.components.map((comp, componentIndex) => h('div', { key: componentIndex, style: styles.bundleSwapRow },
+                h('span', { style: styles.bundleSwapLabel }, 'Komponen ' + (componentIndex + 1) + ' ×' + comp.qty),
+                h('select', { value: comp.productId, onChange: e => updateBundleComponent(i, componentIndex, e.target.value), style: styles.bundleSwapSelect },
+                  [...products].sort((a, b) => String(a.ProductName).localeCompare(String(b.ProductName), 'id-ID')).map(product => h('option', { key: product.ProductID, value: product.ProductID }, product.ProductName + ' (stok ' + product.Stock + ')'))
+                )
+              ))
+            )
           ))
         ),
         h(FormField, { label: 'Catatan' },
@@ -1985,7 +2055,7 @@ function TransactionEditModal({ transaction, onClose, onSave }) {
   );
 }
 
-function SalesReportTab({ api, canEdit, isMobile }) {
+function SalesReportTab({ api, products, bundles, canEdit, isMobile }) {
   const h = React.createElement;
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -2135,7 +2205,10 @@ function SalesReportTab({ api, canEdit, isMobile }) {
           txs.map(tx => h('tr', { key: tx.transactionId, style: styles.tr },
             !isMobile && h('td', { style: styles.td }, tx.dateTime ? new Date(tx.dateTime).toLocaleString('id-ID') : '-'),
             h('td', { style: styles.td },
-              h('div', { style: styles.mobilePrimaryText }, tx.items.map(item => item.name + ' ×' + item.qty).join(', ')),
+              h('div', { style: styles.transactionItemList }, tx.items.map((item, itemIndex) => h('div', { key: itemIndex, style: styles.transactionItemDetail },
+                h('div', { style: styles.mobilePrimaryText }, item.name + ' ×' + item.qty),
+                item.type === 'bundle' && h('div', { style: styles.bundleContentsText }, 'Isi: ' + bundleComponentsText(item, products))
+              ))),
               isMobile && expandedTx === tx.transactionId && h('div', { style: styles.mobileDetailBox },
                 h('div', null, 'Tanggal: ', tx.dateTime ? new Date(tx.dateTime).toLocaleString('id-ID') : '-'),
                 h('div', null, 'Pembayaran: ', paymentMethodLabel(tx.paymentMethod)),
@@ -2157,7 +2230,7 @@ function SalesReportTab({ api, canEdit, isMobile }) {
         )
       )
     ),
-    editing && canEdit && h(TransactionEditModal, { transaction: editing, onClose: () => setEditing(null), onSave: async data => {
+    editing && canEdit && h(TransactionEditModal, { transaction: editing, products, bundles, onClose: () => setEditing(null), onSave: async data => {
       try { await api.callPost('updateTransaction', data); setEditing(null); await loadSummary(); }
       catch (err) { setError('Gagal memperbarui transaksi: ' + err.message); }
     } })
@@ -3052,6 +3125,12 @@ const styles = {
   bundleSwapLabel: { fontSize: 11.5, color: COLORS.textMuted },
   bundleSwapSelect: { width: '100%', padding: '7px 9px', border: `1px solid ${COLORS.border}`, borderRadius: 6, fontSize: 12, background: '#fff' },
   bundleStockError: { color: COLORS.danger, fontSize: 11.5, fontWeight: 600, marginTop: 4 },
+  bundleUnitBadge: { padding: '5px 9px', borderRadius: 999, background: COLORS.primaryLight, color: COLORS.primary, fontSize: 11.5, fontWeight: 700 },
+  bundleEditComponents: { marginTop: 8, padding: 10, borderRadius: 8, background: '#f8fafc', border: `1px solid ${COLORS.border}` },
+  transactionEditItem: { padding: '10px 0', borderBottom: `1px solid ${COLORS.border}` },
+  transactionItemList: { display: 'flex', flexDirection: 'column', gap: 8 },
+  transactionItemDetail: { paddingBottom: 6, borderBottom: '1px solid #f1f5f9' },
+  bundleContentsText: { marginTop: 3, color: COLORS.textMuted, fontSize: 11.5, lineHeight: 1.4 },
   paymentTotalDisplay: {
     textAlign: 'center',
     padding: '10px 0 24px'
