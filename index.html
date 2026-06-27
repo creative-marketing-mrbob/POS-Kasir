@@ -241,6 +241,10 @@ const paymentMethodLabel = method => ({
   qris_mrbob: 'QRIS Mr.BOB',
   qris_merchandise: 'QRIS Merchandise'
 }[method] || method || '-');
+const localDateInputValue = (date = new Date()) => {
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 10);
+};
 const STORAGE_KEY_URL = 'pos_webapp_url';
 const DEFAULT_WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxnknylCaGY-aCBFEGQDPClpGlIN5Y01gEYbdbVuEyZfS3nFfKlSy9Lsf854Np5OE6U/exec';
 const AUTH_STORAGE_KEY = 'pos_auth_session';
@@ -2057,12 +2061,13 @@ function TransactionEditModal({ transaction, products, bundles, onClose, onSave 
 
 function SalesReportTab({ api, products, bundles, canEdit, isMobile }) {
   const h = React.createElement;
+  const today = localDateInputValue();
   const [summary, setSummary] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
-  const [appliedFilter, setAppliedFilter] = useState({ startDate: '', endDate: '' });
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(today);
+  const [appliedFilter, setAppliedFilter] = useState({ startDate: today, endDate: today });
   const [editing, setEditing] = useState(null);
   const [showAllProducts, setShowAllProducts] = useState(false);
   const [showAllBundles, setShowAllBundles] = useState(false);
@@ -2368,11 +2373,26 @@ function FinancialReportTab({ api, canEdit, isMobile }) {
       h('button', { onClick: loadFinance, style: styles.secondaryBtn }, h(RefreshCw, { size: 14 }), ' Muat Ulang')
     ),
     error && h('div', { style: styles.errorBanner }, h(AlertCircle, { size: 16 }), h('span', null, error)),
-    h('div', { style: styles.statGrid },
-      h('div', { style: styles.statCard }, h('span', { style: styles.statLabel }, 'Dompet Cash'), h('span', { style: styles.statValue }, formatRupiah(summary.balances.cash))),
-      h('div', { style: styles.statCard }, h('span', { style: styles.statLabel }, 'Dompet QRIS Mr.BOB'), h('span', { style: styles.statValue }, formatRupiah(summary.balances.qris_mrbob))),
-      h('div', { style: styles.statCard }, h('span', { style: styles.statLabel }, 'Dompet QRIS Merchandise'), h('span', { style: styles.statValue }, formatRupiah(summary.balances.qris_merchandise))),
-      h('div', { style: { ...styles.statCard, ...styles.statCardHighlight } }, h('span', { style: styles.statLabelHighlight }, 'Total Semua Dompet'), h('span', { style: { ...styles.statValue, color: '#fff' } }, formatRupiah(summary.totalBalance)))
+    h('div', { style: { ...styles.financeWalletGrid, ...(isMobile ? styles.financeWalletGridMobile : {}) } },
+      walletGroups.map(wallet => h('div', { key: wallet.id, style: styles.financeWalletCard },
+        h('div', { style: styles.financeWalletHeader }, wallet.label),
+        h('div', { style: styles.financeWalletRow },
+          h('span', { style: styles.financeWalletLabel }, 'Pemasukan'),
+          h('span', { style: styles.financeIncomeValue }, formatRupiah(summary.income?.[wallet.id] || 0))
+        ),
+        h('div', { style: styles.financeWalletRow },
+          h('span', { style: styles.financeWalletLabel }, 'Pengeluaran'),
+          h('span', { style: styles.financeExpenseValue }, formatRupiah(summary.expenses?.[wallet.id] || 0))
+        ),
+        h('div', { style: styles.financeWalletTotalRow },
+          h('span', null, 'Saldo Akhir'),
+          h('span', null, formatRupiah(summary.balances?.[wallet.id] || 0))
+        )
+      ))
+    ),
+    h('div', { style: styles.financeGrandTotal },
+      h('span', null, 'Total Akhir Semua Dompet'),
+      h('strong', null, formatRupiah(summary.totalBalance))
     ),
     canEdit && h('div', { style: { ...styles.filterBar, marginBottom: 20, alignItems: 'flex-end' } },
       h('div', { style: { minWidth: 150 } }, h('label', { style: styles.formLabel }, 'Jenis'), h('select', { value: form.type, onChange: e => setForm({ ...form, type: e.target.value }), style: { ...styles.formInput, height: 38, lineHeight: '20px' } },
@@ -3367,6 +3387,63 @@ const styles = {
     color: COLORS.danger,
     fontSize: 12,
     fontWeight: 700
+  },
+  financeWalletGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+    gap: 14,
+    marginBottom: 14
+  },
+  financeWalletGridMobile: {
+    gridTemplateColumns: '1fr'
+  },
+  financeWalletCard: {
+    background: '#fff',
+    border: `1px solid ${COLORS.border}`,
+    borderRadius: 12,
+    overflow: 'hidden'
+  },
+  financeWalletHeader: {
+    padding: '11px 14px',
+    background: '#f8fafc',
+    borderBottom: `1px solid ${COLORS.border}`,
+    fontSize: 13,
+    fontWeight: 800,
+    color: COLORS.text
+  },
+  financeWalletRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    padding: '12px 14px',
+    borderBottom: '1px solid #f1f5f9'
+  },
+  financeWalletLabel: { fontSize: 12.5, color: COLORS.textMuted },
+  financeIncomeValue: { fontSize: 14, fontWeight: 800, color: '#15803d' },
+  financeExpenseValue: { fontSize: 14, fontWeight: 800, color: COLORS.danger },
+  financeWalletTotalRow: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+    padding: '13px 14px',
+    background: COLORS.primaryLight,
+    color: COLORS.primary,
+    fontSize: 13.5,
+    fontWeight: 800
+  },
+  financeGrandTotal: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 14,
+    padding: '14px 16px',
+    marginBottom: 18,
+    borderRadius: 10,
+    background: COLORS.primary,
+    color: '#fff',
+    fontSize: 14
   },
   cashFlowFilterBar: {
     display: 'flex',
